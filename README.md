@@ -2,15 +2,19 @@
 
 Proyecto base de Spring Boot para aprendizaje y desarrollo de aplicaciones Java con persistencia JPA.
 
+**Nombre del Proyecto:** proyectoMaven  
+**Propósito:** Sistema de gestión de tareas (en desarrollo)  
+**Rama actual:** `primerPaso`
+
 ---
 
 ## 📋 Estado del Proyecto
 
-| Estado | Versión | Última actualización |
-|--------|---------|---------------------|
-| ✅ Funcional | 0.0.1-SNAPSHOT | 2026-05-01 |
+| Estado | Versión | Última actualización | Rama |
+|--------|---------|---------------------|------|
+| ✅ CRUD Usuarios Funcional | 0.0.1-SNAPSHOT | 2026-05-01 | primerPaso |
 
-**Última sesión:** Se creó proyecto base, compiló exitosamente y se verificó levantamiento de la aplicación con H2 Database.
+**Última sesión:** Se implementó CRUD completo de usuarios con validaciones, datos de prueba y pruebas exitosas de todos los endpoints.
 
 ---
 
@@ -24,6 +28,7 @@ Proyecto base de Spring Boot para aprendizaje y desarrollo de aplicaciones Java 
 | **H2 Database** | Runtime | Base de datos en memoria (desarrollo) |
 | **Hibernate** | 6.3.1.Final | ORM para persistencia JPA |
 | **Tomcat** | Embedido | Servidor web embebido |
+| **Jackson** | Runtime | Serialización JSON |
 
 ---
 
@@ -35,10 +40,23 @@ proyectoMaven/
 ├── README.md                        # Este archivo (documentación y contexto)
 ├── src/
 │   ├── main/
-│   │   ├── java/com/example/demo/
-│   │   │   └── DemoApplication.java # Clase principal (entry point)
+│   │   ├── java/com/
+│   │   │   └── example/
+│   │   │       ├── demo/
+│   │   │       │   └── DemoApplication.java      # Clase principal
+│   │   │       └── proyectoMaven/
+│   │   │           ├── model/
+│   │   │           │   ├── Usuario.java          # Entidad JPA Usuario
+│   │   │           │   └── Estado.java           # Entidad JPA Estado
+│   │   │           ├── repository/
+│   │   │           │   └── UsuarioRepository.java # Repository JPA
+│   │   │           ├── service/
+│   │   │           │   └── UsuarioService.java   # Service con lógica
+│   │   │           └── controller/
+│   │   │               └── UsuarioController.java # REST Controller
 │   │   └── resources/
-│   │       └── application.properties # Configuración de la app
+│   │       ├── application.properties             # Configuración
+│   │       └── import.sql                         # Datos de prueba
 │   └── test/                        # Tests (pendiente)
 └── target/                          # Build output (generado por Maven)
 ```
@@ -58,7 +76,7 @@ spring.datasource.password=
 
 # JPA/Hibernate
 spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
-spring.jpa.hibernate.ddl-auto=create-drop  # ⚠️ Crea y elimina tablas al iniciar/detener
+spring.jpa.hibernate.ddl-auto=create-drop
 
 # H2 Console - Acceso web a la BD
 spring.h2.console.enabled=true
@@ -68,13 +86,181 @@ spring.h2.console.path=/h2-console
 server.port=8080
 ```
 
-### Dependencias activas (pom.xml)
+### import.sql - Datos de Prueba
 
-- `spring-boot-starter-web` - Web MVC, REST, Tomcat
-- `spring-boot-starter-data-jpa` - Persistencia JPA + Hibernate
-- `h2` - Base de datos en memoria
-- `spring-boot-devtools` - Hot reload en desarrollo
-- `spring-boot-starter-test` - Testing (JUnit, Mockito, etc.)
+Se ejecuta automáticamente al iniciar la aplicación:
+
+```sql
+-- Estados
+INSERT INTO ESTADOS (ID, ESTADO, CATEGORIA) VALUES (1, 'activo', 'usuario');
+INSERT INTO ESTADOS (ID, ESTADO, CATEGORIA) VALUES (2, 'inactivo', 'usuario');
+
+-- Usuarios de prueba
+INSERT INTO USUARIOS (ID, USUARIO, NOMBRE, CORREO, PASSWORD, ESTADO_ID) 
+VALUES (1, 'usuario1', 'Usuario Uno', 'usuario1@test.com', 'usuario1', 1);
+INSERT INTO USUARIOS (ID, USUARIO, NOMBRE, CORREO, PASSWORD, ESTADO_ID) 
+VALUES (2, 'usuario2', 'Usuario Dos', 'usuario2@test.com', 'usuario2', 2);
+INSERT INTO USUARIOS (ID, USUARIO, NOMBRE, CORREO, PASSWORD, ESTADO_ID) 
+VALUES (3, 'usuario3', 'Usuario Tres', 'usuario3@test.com', 'usuario3', 1);
+```
+
+---
+
+## 📦 Modelos de Datos
+
+### Entidad: Estado
+
+Representa los estados posibles de un usuario (activo/inactivo).
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | Long | ID auto-generado |
+| `estado` | String | Nombre del estado ("activo", "inactivo") |
+| `categoria` | String | Categoría del estado ("usuario") |
+
+**Tabla:** `estados`
+
+### Entidad: Usuario
+
+Representa un usuario del sistema con relación a Estado.
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | Long | ID auto-generado |
+| `usuario` | String | Nombre de usuario (único) |
+| `nombre` | String | Nombre completo |
+| `correo` | String | Email (único) |
+| `password` | String | Contraseña (en texto plano por ahora) |
+| `estado` | Estado | Relación ManyToOne a Estado |
+
+**Tabla:** `usuarios`  
+**Relación:** `@ManyToOne(fetch = FetchType.LAZY)` con Estado
+
+---
+
+## 🌐 Endpoints REST Disponibles
+
+### 1. GET /usuarios - Listar todos los usuarios
+
+**Descripción:** Retorna lista completa de usuarios con sus estados.
+
+**Respuesta exitosa (200):**
+```json
+{
+    "total": 3,
+    "data": [
+        {
+            "id": 1,
+            "usuario": "usuario1",
+            "nombre": "Usuario Uno",
+            "correo": "usuario1@test.com",
+            "password": "***",
+            "estado": {
+                "id": 1,
+                "estado": "activo",
+                "categoria": "usuario"
+            }
+        }
+    ],
+    "success": true,
+    "mensaje": "Usuarios listados exitosamente"
+}
+```
+
+---
+
+### 2. POST /usuarios/{id} - Obtener usuario por ID
+
+**Descripción:** Retorna un usuario específico por su ID.
+
+**Parámetros:**
+- `id` (path) - ID del usuario
+
+**Respuesta exitosa (200):**
+```json
+{
+    "data": {
+        "id": 1,
+        "usuario": "usuario1",
+        "nombre": "Usuario Uno",
+        "correo": "usuario1@test.com",
+        "password": "***",
+        "estado": {
+            "id": 1,
+            "estado": "activo",
+            "categoria": "usuario"
+        }
+    },
+    "success": true,
+    "mensaje": "Usuario encontrado"
+}
+```
+
+**Respuesta error (404):**
+```json
+{
+    "success": false,
+    "mensaje": "No se encontró un usuario con el ID: 999"
+}
+```
+
+---
+
+### 3. POST /usuarios/editar/{id} - Editar usuario
+
+**Descripción:** Actualiza los datos de un usuario existente.
+
+**Parámetros:**
+- `id` (path) - ID del usuario a editar
+
+**Body (JSON):**
+```json
+{
+    "nombre": "Nuevo Nombre",
+    "correo": "nuevo@email.com",
+    "password": "nuevaPassword",
+    "estado": { "id": 2 }
+}
+```
+
+**Respuesta exitosa (200):**
+```json
+{
+    "data": { ... },
+    "success": true,
+    "mensaje": "Usuario actualizado exitosamente"
+}
+```
+
+**Validaciones:**
+- ✅ El ID debe existir
+- ✅ Usuario y correo deben ser únicos (si se cambian)
+- ✅ Campos opcionales: solo se actualizan los proporcionados
+
+---
+
+### 4. POST /usuarios/eliminar/{id} - Eliminar usuario
+
+**Descripción:** Elimina un usuario por su ID.
+
+**Parámetros:**
+- `id` (path) - ID del usuario a eliminar
+
+**Respuesta exitosa (200):**
+```json
+{
+    "success": true,
+    "mensaje": "Usuario eliminado exitosamente"
+}
+```
+
+**Respuesta error (404):**
+```json
+{
+    "success": false,
+    "mensaje": "No existe un usuario con el ID: 999"
+}
+```
 
 ---
 
@@ -111,44 +297,73 @@ mvn test
 
 ---
 
+## 🧪 Pruebas de Endpoints (curl)
+
+### Listar todos los usuarios
+```bash
+curl http://localhost:8080/usuarios
+```
+
+### Obtener usuario por ID
+```bash
+curl -X POST http://localhost:8080/usuarios/1
+```
+
+### Editar usuario
+```bash
+curl -X POST http://localhost:8080/usuarios/editar/1 \
+  -H "Content-Type: application/json" \
+  -d '{"nombre": "Usuario Actualizado", "correo": "nuevo@test.com"}'
+```
+
+### Eliminar usuario
+```bash
+curl -X POST http://localhost:8080/usuarios/eliminar/2
+```
+
+---
+
 ## ✅ Verificaciones Realizadas
 
 | Fecha | Verificación | Resultado |
 |-------|-------------|-----------|
 | 2026-05-01 | Java 17 instalado | ✅ OpenJDK 17.0.19 |
 | 2026-05-01 | Maven instalado | ✅ 3.9.15 |
-| 2026-05-01 | `mvn compile` | ✅ BUILD SUCCESS (40s) |
-| 2026-05-01 | `mvn spring-boot:run` | ✅ App inició en 0.741s |
-| 2026-05-01 | H2 Database conectada | ✅ HikariPool activo |
-| 2026-05-01 | Tomcat en puerto 8080 | ✅ Escuchando HTTP |
+| 2026-05-01 | `mvn compile` | ✅ BUILD SUCCESS |
+| 2026-05-01 | `mvn spring-boot:run` | ✅ App inició en ~1s |
+| 2026-05-01 | GET /usuarios | ✅ Retorna 3 usuarios |
+| 2026-05-01 | POST /usuarios/1 | ✅ Obtiene usuario específico |
+| 2026-05-01 | POST /usuarios/editar/1 | ✅ Edita usuario exitosamente |
+| 2026-05-01 | POST /usuarios/eliminar/2 | ✅ Elimina usuario exitosamente |
+| 2026-05-01 | GET /usuarios (post-eliminación) | ✅ Confirma 2 usuarios restantes |
 
 ---
 
 ## 📝 Próximos Pasos Sugeridos
 
 ### Prioridad Alta (siguiente sesión)
-- [ ] **Crear primer endpoint REST** - Controlador `@RestController` con `@GetMapping`
-- [ ] **Crear primera entidad JPA** - Ejemplo: `Usuario` o `Producto`
-- [ ] **Crear Repository** - Interface que extiende `JpaRepository`
-- [ ] **Agregar datos de prueba** - Usar `CommandLineRunner` o `data.sql`
-
-### Prioridad Media
-- [ ] **Validaciones** - Agregar `spring-boot-starter-validation`
-- [ ] **DTOs** - Separar entidades de objetos de transferencia
-- [ ] **Service Layer** - Mover lógica de negocio a servicios
+- [ ] **Crear entidad Tarea** - Con relación a Usuario
+- [ ] **CRUD de Tareas** - Controller, Service, Repository
+- [ ] **Validaciones de negocio** - Ej: usuario activo para crear tareas
 - [ ] **Tests unitarios** - JUnit + Mockito para servicios
 
-### Prioridad Baja
-- [ ] **Cambiar a PostgreSQL/MySQL** - Para persistencia real (reemplazar H2)
-- [ ] **Docker** - Contenerizar la aplicación
+### Prioridad Media
+- [ ] **DTOs** - Separar entidades de objetos de transferencia
+- [ ] **Password encriptado** - Usar BCrypt
+- [ ] **Autenticación básica** - Spring Security
 - [ ] **Swagger/OpenAPI** - Documentación automática de endpoints
+
+### Prioridad Baja
+- [ ] **Cambiar a PostgreSQL** - Para persistencia real
+- [ ] **Docker** - Contenerizar la aplicación
 - [ ] **Lombok** - Reducir boilerplate en entidades
+- [ ] **Manejo de excepciones global** - @ControllerAdvice
 
 ---
 
 ## 🔧 Problemas Conocidos / Notas
 
-1. **H2Dialect warning:** Hibernate reporta que `H2Dialect` no necesita especificarse explícitamente. Se puede remover `spring.jpa.database-platform` del properties.
+1. **Password en texto plano:** Actualmente se almacena sin encriptar. Pendiente implementar BCrypt.
 
 2. **H2 en memoria:** Los datos se pierden al reiniciar la app. Para persistencia temporal en archivo:
    ```properties
@@ -160,6 +375,10 @@ mvn test
    spring.jpa.hibernate.ddl-auto=update
    ```
 
+4. **LazyInitializationException:** Las entidades tienen `@JsonIgnoreProperties` para evitar problemas de serialización con Hibernate Lazy Loading.
+
+5. **Configuración de paquetes:** La clase principal usa `@ComponentScan`, `@EnableJpaRepositories` y `@EntityScan` porque los paquetes están fuera del paquete base `com.example.demo`.
+
 ---
 
 ## 📚 Recursos de Aprendizaje
@@ -168,6 +387,7 @@ mvn test
 - **Spring Initializr:** https://start.spring.io/
 - **H2 Database:** http://www.h2database.com/
 - **Maven Reference:** https://maven.apache.org/guides/
+- **Spring Data JPA:** https://spring.io/projects/spring-data-jpa
 
 ---
 
@@ -176,9 +396,9 @@ mvn test
 **Si estás leyendo esto en una nueva sesión:**
 
 1. **Ubicación del proyecto:** `/Users/danielhumsr/Documents/proyectos/proyectoMaven/`
-2. **Estado:** Proyecto base funcional, sin endpoints ni entidades personalizadas
-3. **Objetivo:** Aprender Spring Boot progresivamente con Daniel
-4. **Próximo paso natural:** Crear primer endpoint REST + entidad JPA
+2. **Estado:** CRUD de usuarios completo y funcional con datos de prueba
+3. **Rama:** `primerPaso` (rama de desarrollo)
+4. **Objetivo:** Sistema de gestión de tareas
 5. **Preferencias de Daniel:**
    - Siempre pedir autorización antes de crear/editar archivos o ejecutar comandos
    - Explicar claramente qué se va a hacer y por qué
@@ -186,8 +406,10 @@ mvn test
 
 **Para continuar el desarrollo:**
 - Revisar sección "Próximos Pasos Sugeridos"
-- Preguntar a Daniel qué funcionalidad quiere implementar
+- El siguiente paso natural es crear la entidad `Tarea` con relación a `Usuario`
 - Actualizar este README después de cada sesión significativa
+
+**GitHub:** https://github.com/danielhumsr30/prueba-IA
 
 ---
 
