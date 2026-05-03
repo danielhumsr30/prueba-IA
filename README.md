@@ -12,9 +12,9 @@ Proyecto base de Spring Boot para aprendizaje y desarrollo de aplicaciones Java 
 
 | Estado | Versión | Última actualización | Rama |
 |--------|---------|---------------------|------|
-| ✅ CRUD Usuarios Funcional | 0.0.1-SNAPSHOT | 2026-05-01 | primerPaso |
+| ✅ CRUD Usuarios + Autenticación JWT | 0.0.1-SNAPSHOT | 2026-05-02 | primerPaso |
 
-**Última sesión:** Se implementó CRUD completo de usuarios con validaciones, datos de prueba y pruebas exitosas de todos los endpoints.
+**Última sesión:** Se implementó Spring Security con autenticación JWT. Todos los endpoints están protegidos excepto `/auth/login` y `GET /usuarios`.
 
 ---
 
@@ -28,6 +28,8 @@ Proyecto base de Spring Boot para aprendizaje y desarrollo de aplicaciones Java 
 | **H2 Database** | Runtime | Base de datos en memoria (desarrollo) |
 | **Hibernate** | 6.3.1.Final | ORM para persistencia JPA |
 | **Tomcat** | Embedido | Servidor web embebido |
+| **Spring Security** | 6.2.0 | Autenticación y autorización |
+| **JJWT** | 0.12.3 | Generación y validación de JWT |
 | **Jackson** | Runtime | Serialización JSON |
 
 ---
@@ -51,9 +53,18 @@ proyectoMaven/
 │   │   │           ├── repository/
 │   │   │           │   └── UsuarioRepository.java # Repository JPA
 │   │   │           ├── service/
-│   │   │           │   └── UsuarioService.java   # Service con lógica
-│   │   │           └── controller/
-│   │   │               └── UsuarioController.java # REST Controller
+│   │   │           │   ├── UsuarioService.java   # Service con lógica
+│   │   │           │   └── UserDetailsServiceImpl.java # Spring Security
+│   │   │           ├── controller/
+│   │   │           │   ├── UsuarioController.java # REST Controller
+│   │   │           │   └── AuthController.java    # Autenticación
+│   │   │           ├── dto/
+│   │   │           │   ├── LoginRequest.java     # DTO para login
+│   │   │           │   └── LoginResponse.java    # DTO con JWT
+│   │   │           └── security/
+│   │   │               ├── JwtTokenProvider.java      # Generador de JWT
+│   │   │               ├── JwtAuthenticationFilter.java # Filtro JWT
+│   │   │               └── SecurityConfig.java        # Configuración Security
 │   │   └── resources/
 │   │       ├── application.properties             # Configuración
 │   │       └── import.sql                         # Datos de prueba
@@ -84,6 +95,10 @@ spring.h2.console.path=/h2-console
 
 # Servidor
 server.port=8080
+
+# JWT Configuration
+jwt.secret=ClaveSecretaMuySeguraParaJWT2026QueTieneMasDe256BitsDeLongitudParaHS256
+jwt.expiration=86400000
 ```
 
 ### import.sql - Datos de Prueba
@@ -106,43 +121,65 @@ VALUES (3, 'usuario3', 'Usuario Tres', 'usuario3@test.com', 'usuario3', 1);
 
 ---
 
-## 📦 Modelos de Datos
+## 🔐 Autenticación JWT
 
-### Entidad: Estado
+### Flujo de Autenticación
 
-Representa los estados posibles de un usuario (activo/inactivo).
+1. Cliente envía credenciales a `/auth/login`
+2. Server valida contra BD y genera JWT
+3. Cliente guarda token y lo envía en header: `Authorization: Bearer <token>`
+4. Server valida token en cada request protegido
+5. Si expiró o es inválido → 401 Unauthorized
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `id` | Long | ID auto-generado |
-| `estado` | String | Nombre del estado ("activo", "inactivo") |
-| `categoria` | String | Categoría del estado ("usuario") |
+### Credenciales de Prueba
 
-**Tabla:** `estados`
-
-### Entidad: Usuario
-
-Representa un usuario del sistema con relación a Estado.
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `id` | Long | ID auto-generado |
-| `usuario` | String | Nombre de usuario (único) |
-| `nombre` | String | Nombre completo |
-| `correo` | String | Email (único) |
-| `password` | String | Contraseña (en texto plano por ahora) |
-| `estado` | Estado | Relación ManyToOne a Estado |
-
-**Tabla:** `usuarios`  
-**Relación:** `@ManyToOne(fetch = FetchType.LAZY)` con Estado
+| Usuario | Password | Estado |
+|---------|----------|--------|
+| usuario1 | usuario1 | Activo |
+| usuario2 | usuario2 | Inactivo |
+| usuario3 | usuario3 | Activo |
 
 ---
 
 ## 🌐 Endpoints REST Disponibles
 
-### 1. GET /usuarios - Listar todos los usuarios
+### 🔓 Endpoints Públicos
 
-**Descripción:** Retorna lista completa de usuarios con sus estados.
+#### 1. POST /auth/login - Autenticar usuario
+
+**Descripción:** Genera un token JWT para el usuario autenticado.
+
+**Body (JSON):**
+```json
+{
+    "usuario": "usuario1",
+    "password": "usuario1"
+}
+```
+
+**Respuesta exitosa (200):**
+```json
+{
+    "token": "eyJhbGciOiJIUzUxMiJ9...",
+    "usuario": "usuario1",
+    "success": true,
+    "mensaje": "Autenticación exitosa"
+}
+```
+
+**Respuesta error (401):**
+```json
+{
+    "success": false,
+    "mensaje": "Credenciales inválidas"
+}
+```
+
+---
+
+#### 2. GET /usuarios - Listar todos los usuarios
+
+**Descripción:** Retorna lista completa de usuarios con sus estados (público sin autenticación).
 
 **Respuesta exitosa (200):**
 ```json
@@ -154,7 +191,7 @@ Representa un usuario del sistema con relación a Estado.
             "usuario": "usuario1",
             "nombre": "Usuario Uno",
             "correo": "usuario1@test.com",
-            "password": "***",
+            "password": "usuario1",
             "estado": {
                 "id": 1,
                 "estado": "activo",
@@ -169,7 +206,11 @@ Representa un usuario del sistema con relación a Estado.
 
 ---
 
-### 2. POST /usuarios/{id} - Obtener usuario por ID
+### 🔒 Endpoints Protegidos (Requieren JWT)
+
+**Header requerido:** `Authorization: Bearer <token>`
+
+#### 3. POST /usuarios/{id} - Obtener usuario por ID
 
 **Descripción:** Retorna un usuario específico por su ID.
 
@@ -179,24 +220,13 @@ Representa un usuario del sistema con relación a Estado.
 **Respuesta exitosa (200):**
 ```json
 {
-    "data": {
-        "id": 1,
-        "usuario": "usuario1",
-        "nombre": "Usuario Uno",
-        "correo": "usuario1@test.com",
-        "password": "***",
-        "estado": {
-            "id": 1,
-            "estado": "activo",
-            "categoria": "usuario"
-        }
-    },
+    "data": { ... },
     "success": true,
     "mensaje": "Usuario encontrado"
 }
 ```
 
-**Respuesta error (404):**
+**Respuesta error (403/404):**
 ```json
 {
     "success": false,
@@ -206,7 +236,7 @@ Representa un usuario del sistema con relación a Estado.
 
 ---
 
-### 3. POST /usuarios/editar/{id} - Editar usuario
+#### 4. POST /usuarios/editar/{id} - Editar usuario
 
 **Descripción:** Actualiza los datos de un usuario existente.
 
@@ -239,7 +269,7 @@ Representa un usuario del sistema con relación a Estado.
 
 ---
 
-### 4. POST /usuarios/eliminar/{id} - Eliminar usuario
+#### 5. POST /usuarios/eliminar/{id} - Eliminar usuario
 
 **Descripción:** Elimina un usuario por su ID.
 
@@ -268,7 +298,6 @@ Representa un usuario del sistema con relación a Estado.
 
 ### Compilar proyecto
 ```bash
-cd /Users/danielhumsr/Documents/proyectos/proyectoMaven
 mvn clean compile
 ```
 
@@ -299,26 +328,39 @@ mvn test
 
 ## 🧪 Pruebas de Endpoints (curl)
 
-### Listar todos los usuarios
+### Obtener token JWT
+```bash
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"usuario":"usuario1","password":"usuario1"}'
+```
+
+### Listar todos los usuarios (público)
 ```bash
 curl http://localhost:8080/usuarios
 ```
 
-### Obtener usuario por ID
+### Obtener usuario por ID (requiere token)
 ```bash
-curl -X POST http://localhost:8080/usuarios/1
+TOKEN="eyJhbGciOiJIUzUxMiJ9..."
+curl -X POST http://localhost:8080/usuarios/1 \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-### Editar usuario
+### Editar usuario (requiere token)
 ```bash
+TOKEN="eyJhbGciOiJIUzUxMiJ9..."
 curl -X POST http://localhost:8080/usuarios/editar/1 \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"nombre": "Usuario Actualizado", "correo": "nuevo@test.com"}'
 ```
 
-### Eliminar usuario
+### Eliminar usuario (requiere token)
 ```bash
-curl -X POST http://localhost:8080/usuarios/eliminar/2
+TOKEN="eyJhbGciOiJIUzUxMiJ9..."
+curl -X POST http://localhost:8080/usuarios/eliminar/2 \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -331,11 +373,11 @@ curl -X POST http://localhost:8080/usuarios/eliminar/2
 | 2026-05-01 | Maven instalado | ✅ 3.9.15 |
 | 2026-05-01 | `mvn compile` | ✅ BUILD SUCCESS |
 | 2026-05-01 | `mvn spring-boot:run` | ✅ App inició en ~1s |
-| 2026-05-01 | GET /usuarios | ✅ Retorna 3 usuarios |
-| 2026-05-01 | POST /usuarios/1 | ✅ Obtiene usuario específico |
-| 2026-05-01 | POST /usuarios/editar/1 | ✅ Edita usuario exitosamente |
-| 2026-05-01 | POST /usuarios/eliminar/2 | ✅ Elimina usuario exitosamente |
-| 2026-05-01 | GET /usuarios (post-eliminación) | ✅ Confirma 2 usuarios restantes |
+| 2026-05-02 | Spring Security + JWT | ✅ Implementado |
+| 2026-05-02 | GET /usuarios (público) | ✅ Retorna 3 usuarios |
+| 2026-05-02 | POST /auth/login | ✅ Retorna JWT token |
+| 2026-05-02 | Endpoints protegidos sin token | ✅ 403 Forbidden |
+| 2026-05-02 | Endpoints protegidos con token | ✅ Funciona correctamente |
 
 ---
 
@@ -344,26 +386,26 @@ curl -X POST http://localhost:8080/usuarios/eliminar/2
 ### Prioridad Alta (siguiente sesión)
 - [ ] **Crear entidad Tarea** - Con relación a Usuario
 - [ ] **CRUD de Tareas** - Controller, Service, Repository
-- [ ] **Validaciones de negocio** - Ej: usuario activo para crear tareas
+- [ ] **Asociar tareas a usuario autenticado** - Usar JWT para identificar usuario actual
 - [ ] **Tests unitarios** - JUnit + Mockito para servicios
 
 ### Prioridad Media
+- [ ] **Encriptar passwords con BCrypt** - Cambiar PasswordEncoder en SecurityConfig
 - [ ] **DTOs** - Separar entidades de objetos de transferencia
-- [ ] **Password encriptado** - Usar BCrypt
-- [ ] **Autenticación básica** - Spring Security
+- [ ] **Manejo de excepciones global** - @ControllerAdvice
 - [ ] **Swagger/OpenAPI** - Documentación automática de endpoints
 
 ### Prioridad Baja
 - [ ] **Cambiar a PostgreSQL** - Para persistencia real
 - [ ] **Docker** - Contenerizar la aplicación
 - [ ] **Lombok** - Reducir boilerplate en entidades
-- [ ] **Manejo de excepciones global** - @ControllerAdvice
+- [ ] **Refresh token** - Implementar rotación de tokens
 
 ---
 
 ## 🔧 Problemas Conocidos / Notas
 
-1. **Password en texto plano:** Actualmente se almacena sin encriptar. Pendiente implementar BCrypt.
+1. **Password en texto plano:** Actualmente se almacena sin encriptar. El `PasswordEncoder` está configurado para comparar texto plano. Para producción, cambiar a `BCryptPasswordEncoder()` en `SecurityConfig.java`.
 
 2. **H2 en memoria:** Los datos se pierden al reiniciar la app. Para persistencia temporal en archivo:
    ```properties
@@ -379,15 +421,21 @@ curl -X POST http://localhost:8080/usuarios/eliminar/2
 
 5. **Configuración de paquetes:** La clase principal usa `@ComponentScan`, `@EnableJpaRepositories` y `@EntityScan` porque los paquetes están fuera del paquete base `com.example.demo`.
 
+6. **JWT Secret:** El secreto está hardcodeado en `application.properties`. Para producción, usar variables de entorno.
+
+7. **CORS:** Configurado con `*` para desarrollo. Restringir en producción.
+
 ---
 
 ## 📚 Recursos de Aprendizaje
 
 - **Spring Boot Docs:** https://spring.io/projects/spring-boot
+- **Spring Security:** https://spring.io/projects/spring-security
 - **Spring Initializr:** https://start.spring.io/
 - **H2 Database:** http://www.h2database.com/
 - **Maven Reference:** https://maven.apache.org/guides/
 - **Spring Data JPA:** https://spring.io/projects/spring-data-jpa
+- **JJWT (Java JWT):** https://github.com/jwtk/jjwt
 
 ---
 
@@ -396,7 +444,7 @@ curl -X POST http://localhost:8080/usuarios/eliminar/2
 **Si estás leyendo esto en una nueva sesión:**
 
 1. **Ubicación del proyecto:** `/Users/danielhumsr/Documents/proyectos/proyectoMaven/`
-2. **Estado:** CRUD de usuarios completo y funcional con datos de prueba
+2. **Estado:** CRUD de usuarios completo + autenticación JWT implementada
 3. **Rama:** `primerPaso` (rama de desarrollo)
 4. **Objetivo:** Sistema de gestión de tareas
 5. **Preferencias de Daniel:**
@@ -413,4 +461,4 @@ curl -X POST http://localhost:8080/usuarios/eliminar/2
 
 ---
 
-*Última actualización: 2026-05-01 por Hope (OpenClaw)*
+*Última actualización: 2026-05-02 por Claude*
